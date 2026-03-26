@@ -1,5 +1,5 @@
 import '../styles/popup.css';
-import { MonitoredAccount, NotificationSettings, MastodonAccount, MastodonCredentials, MediaFile, CustomEmoji, PollData } from '../types';
+import { MonitoredAccount, NotificationSettings, MastodonAccount, MastodonCredentials, MediaFile, PollData } from '../types';
 import {
   getMonitoredAccounts,
   setMonitoredAccounts,
@@ -9,7 +9,7 @@ import {
   setPollInterval,
   getCredentials,
 } from '../utils/storage';
-import { getAccountInfo, uploadMedia, getCustomEmojis } from '../utils/api';
+import { getAccountInfo, uploadMedia } from '../utils/api';
 
 let monitoredAccounts: MonitoredAccount[] = [];
 let notificationSettings: NotificationSettings = {
@@ -57,7 +57,6 @@ const mediaInput = document.getElementById('media-input') as HTMLInputElement;
 const mediaPreviewContainer = document.getElementById('media-preview-container') as HTMLDivElement;
 
 let mediaFiles: MediaFile[] = [];
-let customEmojis: CustomEmoji[] = [];
 let pollData: PollData | null = null;
 
 const emojiBtn = document.getElementById('emoji-btn') as HTMLButtonElement;
@@ -65,6 +64,8 @@ const pollBtn = document.getElementById('poll-btn') as HTMLButtonElement;
 const emojiPicker = document.getElementById('emoji-picker') as HTMLDivElement;
 const emojiList = document.getElementById('emoji-list') as HTMLDivElement;
 const emojiSearch = document.getElementById('emoji-search') as HTMLInputElement;
+const emojiTabs = document.getElementById('emoji-tabs') as HTMLDivElement;
+let currentEmojiCategory = 'frequent';
 const pollSection = document.getElementById('poll-section') as HTMLDivElement;
 const pollOptionsContainer = document.getElementById('poll-options') as HTMLDivElement;
 const addPollOptionBtn = document.getElementById('add-poll-option-btn') as HTMLButtonElement;
@@ -72,6 +73,8 @@ const removePollBtn = document.getElementById('remove-poll-btn') as HTMLButtonEl
 const pollExpiresSelect = document.getElementById('poll-expires') as HTMLSelectElement;
 const pollMultipleCheckbox = document.getElementById('poll-multiple') as HTMLInputElement;
 const pollHideTotalsCheckbox = document.getElementById('poll-hide-totals') as HTMLInputElement;
+
+import { STANDARD_EMOJIS } from '../utils/emojis';
 
 const instanceInput = document.getElementById('mastodon-instance') as HTMLInputElement;
 const usernameInput = document.getElementById('mastodon-username') as HTMLInputElement;
@@ -307,63 +310,67 @@ function removePoll(): void {
   inputs.forEach(input => input.value = '');
 }
 
-async function loadCustomEmojis(): Promise<void> {
-  if (!credentials) return;
-  
-  try {
-    customEmojis = await getCustomEmojis(credentials.instance);
-    renderEmojiList(customEmojis);
-  } catch (error) {
-    console.error('加载表情失败:', error);
-  }
-}
-
-function renderEmojiList(emojis: CustomEmoji[]): void {
+function renderStandardEmojis(category: string): void {
   emojiList.innerHTML = '';
   
-  const categories: Record<string, CustomEmoji[]> = {};
-  emojis.forEach(emoji => {
-    const category = emoji.category || '其他';
-    if (!categories[category]) {
-      categories[category] = [];
-    }
-    categories[category].push(emoji);
-  });
+  const emojis = STANDARD_EMOJIS[category];
+  if (!emojis) return;
   
-  Object.entries(categories).forEach(([category, categoryEmojis]) => {
-    const categoryHeader = document.createElement('div');
-    categoryHeader.className = 'emoji-category';
-    categoryHeader.textContent = category;
-    emojiList.appendChild(categoryHeader);
-    
-    categoryEmojis.forEach(emoji => {
-      const item = document.createElement('div');
-      item.className = 'emoji-item';
-      item.title = `:${emoji.shortcode}:`;
-      
-      const img = document.createElement('img');
-      img.src = emoji.url;
-      img.alt = emoji.shortcode;
-      img.style.width = '24px';
-      img.style.height = '24px';
-      
-      item.appendChild(img);
-      item.addEventListener('click', () => insertEmoji(`:${emoji.shortcode}:`));
-      emojiList.appendChild(item);
-    });
+  emojis.forEach(emojiData => {
+    const item = document.createElement('div');
+    item.className = 'emoji-item';
+    item.title = emojiData.name;
+    item.textContent = emojiData.emoji;
+    item.addEventListener('click', () => insertEmoji(emojiData.emoji));
+    emojiList.appendChild(item);
   });
+}
+
+function renderEmojiList(): void {
+  renderStandardEmojis(currentEmojiCategory);
 }
 
 function filterEmojis(searchTerm: string): void {
   if (!searchTerm) {
-    renderEmojiList(customEmojis);
+    renderEmojiList();
     return;
   }
   
-  const filtered = customEmojis.filter(emoji => 
-    emoji.shortcode.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  renderEmojiList(filtered);
+  emojiList.innerHTML = '';
+  
+  const lowerSearch = searchTerm.toLowerCase();
+  
+  Object.entries(STANDARD_EMOJIS).forEach(([category, emojis]) => {
+    const filtered = emojis.filter(e => 
+      e.name.toLowerCase().includes(lowerSearch) || 
+      e.emoji.includes(searchTerm)
+    );
+    
+    if (filtered.length > 0) {
+      const categoryHeader = document.createElement('div');
+      categoryHeader.className = 'emoji-category';
+      const categoryNames: Record<string, string> = {
+        smileys: '😀 表情',
+        people: '👋 人物',
+        animals: '🐱 动物',
+        food: '🍕 食物',
+        activities: '⚽ 活动',
+        objects: '💡 物品',
+        symbols: '❤️ 符号',
+      };
+      categoryHeader.textContent = categoryNames[category] || category;
+      emojiList.appendChild(categoryHeader);
+      
+      filtered.forEach(emojiData => {
+        const item = document.createElement('div');
+        item.className = 'emoji-item';
+        item.title = emojiData.name;
+        item.textContent = emojiData.emoji;
+        item.addEventListener('click', () => insertEmoji(emojiData.emoji));
+        emojiList.appendChild(item);
+      });
+    }
+  });
 }
 
 function insertEmoji(shortcode: string): void {
@@ -379,8 +386,8 @@ function toggleEmojiPicker(): void {
   emojiPicker.style.display = isHidden ? 'block' : 'none';
   emojiBtn.classList.toggle('active', isHidden);
   
-  if (isHidden && customEmojis.length === 0) {
-    loadCustomEmojis();
+  if (isHidden) {
+    renderEmojiList();
   }
 }
 
@@ -801,6 +808,22 @@ removePollBtn.addEventListener('click', removePoll);
 emojiBtn.addEventListener('click', toggleEmojiPicker);
 emojiSearch.addEventListener('input', (e) => {
   filterEmojis((e.target as HTMLInputElement).value);
+});
+
+emojiTabs.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  if (target.classList.contains('emoji-tab')) {
+    const category = target.dataset.category;
+    if (category) {
+      document.querySelectorAll('.emoji-tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      target.classList.add('active');
+      currentEmojiCategory = category;
+      emojiSearch.value = '';
+      renderEmojiList();
+    }
+  }
 });
 
 document.addEventListener('click', (e) => {
