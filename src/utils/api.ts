@@ -3,6 +3,7 @@ import {
   MastodonAccount,
   PostStatusOptions,
   MastodonMediaAttachment,
+  CustomEmoji,
 } from '../types';
 
 export async function getAccountId(instance: string, username: string): Promise<string | null> {
@@ -158,4 +159,19 @@ export function stripHtml(html: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .trim();
+}
+
+export async function getCustomEmojis(instance: string): Promise<CustomEmoji[]> {
+  const url = `https://${instance}/api/v1/custom_emojis`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response.json();
+  } catch (error) {
+    console.error(`Failed to get custom emojis from ${instance}:`, error);
+    return [];
+  }
 }

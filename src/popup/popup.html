@@ -40,6 +40,77 @@
           <span id="char-count">0/500</span>
         </div>
       </div>
+      
+      <div class="media-upload-section">
+        <div class="media-upload-header">
+          <label for="media-input" class="media-upload-label">
+            <span class="media-icon">📎</span>
+            添加媒体
+          </label>
+          <input type="file" id="media-input" accept="image/*,video/*,audio/*" multiple hidden>
+          <span class="media-hint">支持图片、视频、音频</span>
+        </div>
+        <div id="media-preview-container" class="media-preview-container"></div>
+      </div>
+      
+      <div class="post-tools">
+        <button id="emoji-btn" class="tool-btn" title="添加表情">
+          <span>😊</span> 表情
+        </button>
+        <button id="poll-btn" class="tool-btn" title="添加投票">
+          <span>📊</span> 投票
+        </button>
+      </div>
+      
+      <div id="emoji-picker" class="emoji-picker" style="display: none;">
+        <div class="emoji-search">
+          <input type="text" id="emoji-search" placeholder="搜索表情...">
+        </div>
+        <div id="emoji-list" class="emoji-list"></div>
+      </div>
+      
+      <div id="poll-section" class="poll-section" style="display: none;">
+        <div class="poll-header">
+          <h3>投票设置</h3>
+          <button id="remove-poll-btn" class="btn-remove-poll">×</button>
+        </div>
+        <div id="poll-options">
+          <div class="poll-option">
+            <input type="text" class="poll-option-input" placeholder="选项 1">
+          </div>
+          <div class="poll-option">
+            <input type="text" class="poll-option-input" placeholder="选项 2">
+          </div>
+        </div>
+        <button id="add-poll-option-btn" class="btn-add-option">+ 添加选项</button>
+        <div class="poll-settings">
+          <div class="poll-setting">
+            <label>投票时长:</label>
+            <select id="poll-expires">
+              <option value="300">5 分钟</option>
+              <option value="1800">30 分钟</option>
+              <option value="3600">1 小时</option>
+              <option value="21600">6 小时</option>
+              <option value="86400" selected>24 小时</option>
+              <option value="172800">2 天</option>
+              <option value="604800">7 天</option>
+            </select>
+          </div>
+          <div class="poll-setting">
+            <label class="checkbox-label">
+              <input type="checkbox" id="poll-multiple">
+              多选
+            </label>
+          </div>
+          <div class="poll-setting">
+            <label class="checkbox-label">
+              <input type="checkbox" id="poll-hide-totals">
+              隐藏投票结果
+            </label>
+          </div>
+        </div>
+      </div>
+      
       <div class="form-group cw-group">
         <label class="checkbox-label">
           <input type="checkbox" id="cw-toggle">

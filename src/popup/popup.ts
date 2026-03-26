@@ -1,5 +1,5 @@
 import '../styles/popup.css';
-import { MonitoredAccount, NotificationSettings, MastodonAccount, MastodonCredentials } from '../types';
+import { MonitoredAccount, NotificationSettings, MastodonAccount, MastodonCredentials, MediaFile, CustomEmoji, PollData } from '../types';
 import {
   getMonitoredAccounts,
   setMonitoredAccounts,
@@ -9,7 +9,7 @@ import {
   setPollInterval,
   getCredentials,
 } from '../utils/storage';
-import { getAccountInfo } from '../utils/api';
+import { getAccountInfo, uploadMedia, getCustomEmojis } from '../utils/api';
 
 let monitoredAccounts: MonitoredAccount[] = [];
 let notificationSettings: NotificationSettings = {
@@ -53,6 +53,26 @@ const postBtn = document.getElementById('post-btn') as HTMLButtonElement;
 const charCount = document.getElementById('char-count') as HTMLSpanElement;
 const MAX_CHARS = 500;
 
+const mediaInput = document.getElementById('media-input') as HTMLInputElement;
+const mediaPreviewContainer = document.getElementById('media-preview-container') as HTMLDivElement;
+
+let mediaFiles: MediaFile[] = [];
+let customEmojis: CustomEmoji[] = [];
+let pollData: PollData | null = null;
+
+const emojiBtn = document.getElementById('emoji-btn') as HTMLButtonElement;
+const pollBtn = document.getElementById('poll-btn') as HTMLButtonElement;
+const emojiPicker = document.getElementById('emoji-picker') as HTMLDivElement;
+const emojiList = document.getElementById('emoji-list') as HTMLDivElement;
+const emojiSearch = document.getElementById('emoji-search') as HTMLInputElement;
+const pollSection = document.getElementById('poll-section') as HTMLDivElement;
+const pollOptionsContainer = document.getElementById('poll-options') as HTMLDivElement;
+const addPollOptionBtn = document.getElementById('add-poll-option-btn') as HTMLButtonElement;
+const removePollBtn = document.getElementById('remove-poll-btn') as HTMLButtonElement;
+const pollExpiresSelect = document.getElementById('poll-expires') as HTMLSelectElement;
+const pollMultipleCheckbox = document.getElementById('poll-multiple') as HTMLInputElement;
+const pollHideTotalsCheckbox = document.getElementById('poll-hide-totals') as HTMLInputElement;
+
 const instanceInput = document.getElementById('mastodon-instance') as HTMLInputElement;
 const usernameInput = document.getElementById('mastodon-username') as HTMLInputElement;
 const addAccountBtn = document.getElementById('add-account') as HTMLButtonElement;
@@ -92,6 +112,281 @@ function updateCharCount(): void {
   const length = postContent.value.length;
   charCount.textContent = `${length}/${MAX_CHARS}`;
   charCount.style.color = length > MAX_CHARS ? '#dc3545' : '#666';
+}
+
+function getMediaType(file: File): 'image' | 'video' | 'audio' {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
+  return 'image';
+}
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 15);
+}
+
+function renderMediaPreviews(): void {
+  mediaPreviewContainer.innerHTML = '';
+  
+  mediaFiles.forEach((media, index) => {
+    const item = document.createElement('div');
+    item.className = 'media-preview-item';
+    
+    if (media.status === 'uploading') {
+      item.classList.add('media-uploading');
+    } else if (media.status === 'error') {
+      item.classList.add('media-error');
+    }
+    
+    if (media.type === 'image') {
+      const img = document.createElement('img');
+      img.src = media.previewUrl;
+      img.alt = media.file.name;
+      item.appendChild(img);
+    } else if (media.type === 'video') {
+      const video = document.createElement('video');
+      video.src = media.previewUrl;
+      video.muted = true;
+      item.appendChild(video);
+    } else if (media.type === 'audio') {
+      const audioDiv = document.createElement('div');
+      audioDiv.className = 'audio-preview';
+      audioDiv.textContent = '🎵';
+      item.appendChild(audioDiv);
+    }
+    
+    const typeBadge = document.createElement('span');
+    typeBadge.className = 'media-type-badge';
+    typeBadge.textContent = media.type;
+    item.appendChild(typeBadge);
+    
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove-media-btn';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeMedia(index);
+    });
+    item.appendChild(removeBtn);
+    
+    mediaPreviewContainer.appendChild(item);
+  });
+}
+
+function removeMedia(index: number): void {
+  const media = mediaFiles[index];
+  if (media.previewUrl && media.previewUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(media.previewUrl);
+  }
+  mediaFiles.splice(index, 1);
+  renderMediaPreviews();
+}
+
+async function handleMediaSelect(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const files = input.files;
+  
+  if (!files || files.length === 0) return;
+  
+  const MAX_MEDIA = 4;
+  const remainingSlots = MAX_MEDIA - mediaFiles.filter(m => m.status !== 'error').length;
+  
+  if (remainingSlots <= 0) {
+    showStatus(`最多只能添加 ${MAX_MEDIA} 个媒体文件`, true);
+    return;
+  }
+  
+  const filesToAdd = Array.from(files).slice(0, remainingSlots);
+  
+  for (const file of filesToAdd) {
+    const mediaFile: MediaFile = {
+      file,
+      id: generateId(),
+      previewUrl: URL.createObjectURL(file),
+      type: getMediaType(file),
+      status: 'pending'
+    };
+    mediaFiles.push(mediaFile);
+  }
+  
+  renderMediaPreviews();
+  input.value = '';
+}
+
+async function uploadAllMedia(token: string): Promise<string[]> {
+  const uploadedIds: string[] = [];
+  
+  const pendingMedia = mediaFiles.filter(m => m.status === 'pending');
+  
+  for (const media of pendingMedia) {
+    try {
+      media.status = 'uploading';
+      renderMediaPreviews();
+      
+      const attachment = await uploadMedia(
+        credentials!.instance,
+        token,
+        media.file
+      );
+      
+      media.status = 'uploaded';
+      media.attachmentId = attachment.id;
+      uploadedIds.push(attachment.id);
+    } catch (error) {
+      media.status = 'error';
+      media.error = error instanceof Error ? error.message : '上传失败';
+      console.error('媒体上传失败:', error);
+    }
+    
+    renderMediaPreviews();
+  }
+  
+  return uploadedIds;
+}
+
+function getPollOptions(): string[] {
+  const inputs = pollOptionsContainer.querySelectorAll('.poll-option-input') as NodeListOf<HTMLInputElement>;
+  const options: string[] = [];
+  inputs.forEach(input => {
+    const value = input.value.trim();
+    if (value) {
+      options.push(value);
+    }
+  });
+  return options;
+}
+
+function updatePollButtonState(): void {
+  const options = getPollOptions();
+  pollBtn.classList.toggle('active', pollData !== null && options.length >= 2);
+}
+
+function togglePoll(): void {
+  if (pollData) {
+    pollData = null;
+    pollSection.style.display = 'none';
+    pollBtn.classList.remove('active');
+  } else {
+    pollData = {
+      options: [],
+      expiresIn: 86400,
+      multiple: false,
+      hideTotals: false
+    };
+    pollSection.style.display = 'block';
+    pollBtn.classList.add('active');
+    
+    const inputs = pollOptionsContainer.querySelectorAll('.poll-option-input') as NodeListOf<HTMLInputElement>;
+    inputs[0].value = '';
+    inputs[1].value = '';
+  }
+}
+
+function addPollOption(): void {
+  const optionCount = pollOptionsContainer.querySelectorAll('.poll-option').length;
+  if (optionCount >= 10) {
+    showStatus('最多只能添加10个选项', true);
+    return;
+  }
+  
+  const div = document.createElement('div');
+  div.className = 'poll-option';
+  div.innerHTML = `<input type="text" class="poll-option-input" placeholder="选项 ${optionCount + 1}">`;
+  pollOptionsContainer.appendChild(div);
+  
+  const newInput = div.querySelector('input') as HTMLInputElement;
+  newInput.addEventListener('input', updatePollButtonState);
+}
+
+function removePoll(): void {
+  pollData = null;
+  pollSection.style.display = 'none';
+  pollBtn.classList.remove('active');
+  
+  const inputs = pollOptionsContainer.querySelectorAll('.poll-option-input') as NodeListOf<HTMLInputElement>;
+  inputs.forEach(input => input.value = '');
+}
+
+async function loadCustomEmojis(): Promise<void> {
+  if (!credentials) return;
+  
+  try {
+    customEmojis = await getCustomEmojis(credentials.instance);
+    renderEmojiList(customEmojis);
+  } catch (error) {
+    console.error('加载表情失败:', error);
+  }
+}
+
+function renderEmojiList(emojis: CustomEmoji[]): void {
+  emojiList.innerHTML = '';
+  
+  const categories: Record<string, CustomEmoji[]> = {};
+  emojis.forEach(emoji => {
+    const category = emoji.category || '其他';
+    if (!categories[category]) {
+      categories[category] = [];
+    }
+    categories[category].push(emoji);
+  });
+  
+  Object.entries(categories).forEach(([category, categoryEmojis]) => {
+    const categoryHeader = document.createElement('div');
+    categoryHeader.className = 'emoji-category';
+    categoryHeader.textContent = category;
+    emojiList.appendChild(categoryHeader);
+    
+    categoryEmojis.forEach(emoji => {
+      const item = document.createElement('div');
+      item.className = 'emoji-item';
+      item.title = `:${emoji.shortcode}:`;
+      
+      const img = document.createElement('img');
+      img.src = emoji.url;
+      img.alt = emoji.shortcode;
+      img.style.width = '24px';
+      img.style.height = '24px';
+      
+      item.appendChild(img);
+      item.addEventListener('click', () => insertEmoji(`:${emoji.shortcode}:`));
+      emojiList.appendChild(item);
+    });
+  });
+}
+
+function filterEmojis(searchTerm: string): void {
+  if (!searchTerm) {
+    renderEmojiList(customEmojis);
+    return;
+  }
+  
+  const filtered = customEmojis.filter(emoji => 
+    emoji.shortcode.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  renderEmojiList(filtered);
+}
+
+function insertEmoji(shortcode: string): void {
+  const cursorPos = postContent.selectionStart;
+  const text = postContent.value;
+  postContent.value = text.slice(0, cursorPos) + shortcode + text.slice(cursorPos);
+  postContent.focus();
+  updateCharCount();
+}
+
+function toggleEmojiPicker(): void {
+  const isHidden = emojiPicker.style.display === 'none';
+  emojiPicker.style.display = isHidden ? 'block' : 'none';
+  emojiBtn.classList.toggle('active', isHidden);
+  
+  if (isHidden && customEmojis.length === 0) {
+    loadCustomEmojis();
+  }
+}
+
+function hideEmojiPicker(): void {
+  emojiPicker.style.display = 'none';
+  emojiBtn.classList.remove('active');
 }
 
 function updateLoginUI(): void {
@@ -364,14 +659,21 @@ async function handleLogout(): Promise<void> {
 
 async function handlePost(): Promise<void> {
   const content = postContent.value.trim();
+  const pollOptions = getPollOptions();
+  const hasValidPoll = pollOptions.length >= 2;
 
-  if (!content) {
-    showStatus('请输入要发布的内容', true);
+  if (!content && mediaFiles.length === 0 && !hasValidPoll) {
+    showStatus('请输入要发布的内容、添加媒体或创建投票', true);
     return;
   }
 
   if (content.length > MAX_CHARS) {
     showStatus(`内容超过 ${MAX_CHARS} 字符限制`, true);
+    return;
+  }
+
+  if (hasValidPoll && mediaFiles.length > 0) {
+    showStatus('投票和媒体不能同时添加', true);
     return;
   }
 
@@ -394,10 +696,46 @@ async function handlePost(): Promise<void> {
       return;
     }
 
+    let mediaIds: string[] = [];
+    
+    if (!hasValidPoll) {
+      const pendingMedia = mediaFiles.filter(m => m.status === 'pending');
+      if (pendingMedia.length > 0) {
+        mediaIds = await uploadAllMedia(tokenResponse.token);
+        
+        const hasError = mediaFiles.some(m => m.status === 'error');
+        if (hasError && mediaIds.length === 0) {
+          showStatus('媒体上传失败，请检查后重试', true);
+          postBtn.disabled = false;
+          postBtn.textContent = '发布';
+          return;
+        }
+      }
+      
+      const alreadyUploaded = mediaFiles
+        .filter(m => m.status === 'uploaded' && m.attachmentId)
+        .map(m => m.attachmentId!);
+      mediaIds = [...alreadyUploaded, ...mediaIds];
+    }
+
     const body: Record<string, unknown> = {
       status: content,
       visibility: postVisibility.value,
     };
+
+    if (mediaIds.length > 0) {
+      body.media_ids = mediaIds;
+    }
+
+    const pollOptions = getPollOptions();
+    if (pollOptions.length >= 2) {
+      body.poll = {
+        options: pollOptions,
+        expires_in: parseInt(pollExpiresSelect.value),
+        multiple: pollMultipleCheckbox.checked,
+        hide_totals: pollHideTotalsCheckbox.checked
+      };
+    }
 
     if (cwToggle.checked && spoilerText.value.trim()) {
       body.spoiler_text = spoilerText.value.trim();
@@ -424,6 +762,16 @@ async function handlePost(): Promise<void> {
     cwToggle.checked = false;
     spoilerWrapper.style.display = 'none';
     updateCharCount();
+    
+    mediaFiles.forEach(m => {
+      if (m.previewUrl && m.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(m.previewUrl);
+      }
+    });
+    mediaFiles = [];
+    renderMediaPreviews();
+    
+    removePoll();
   } catch (error) {
     showStatus('发布失败: ' + (error instanceof Error ? error.message : 'Unknown error'), true);
   } finally {
@@ -444,6 +792,23 @@ addAccountBtn.addEventListener('click', addAccount);
 saveSettingsBtn.addEventListener('click', saveSettings);
 checkNowBtn.addEventListener('click', checkNow);
 postBtn.addEventListener('click', handlePost);
+mediaInput.addEventListener('change', handleMediaSelect);
+
+pollBtn.addEventListener('click', togglePoll);
+addPollOptionBtn.addEventListener('click', addPollOption);
+removePollBtn.addEventListener('click', removePoll);
+
+emojiBtn.addEventListener('click', toggleEmojiPicker);
+emojiSearch.addEventListener('input', (e) => {
+  filterEmojis((e.target as HTMLInputElement).value);
+});
+
+document.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  if (!emojiPicker.contains(target) && target !== emojiBtn) {
+    hideEmojiPicker();
+  }
+});
 
 notificationMethod.addEventListener('change', updateNotificationSettings);
 

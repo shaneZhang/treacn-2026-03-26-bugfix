@@ -112,3 +112,33 @@ export interface StorageData {
   credentials: MastodonCredentials | null;
   oauthApps: Record<string, OAuthApp>;
 }
+
+export interface MediaFile {
+  file: File;
+  id: string;
+  previewUrl: string;
+  type: 'image' | 'video' | 'audio';
+  status: 'pending' | 'uploading' | 'uploaded' | 'error';
+  attachmentId?: string;
+  error?: string;
+}
+
+export interface PollOption {
+  id: string;
+  text: string;
+}
+
+export interface PollData {
+  options: PollOption[];
+  expiresIn: number;
+  multiple: boolean;
+  hideTotals: boolean;
+}
+
+export interface CustomEmoji {
+  shortcode: string;
+  url: string;
+  static_url: string;
+  visible_in_picker: boolean;
+  category?: string;
+}
