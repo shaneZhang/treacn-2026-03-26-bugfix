@@ -163,13 +163,26 @@ export function stripHtml(html: string): string {
 
 export async function getCustomEmojis(instance: string): Promise<CustomEmoji[]> {
   const url = `https://${instance}/api/v1/custom_emojis`;
+  console.log('正在获取表情列表:', url);
 
   try {
     const response = await fetch(url);
+    console.log('表情API响应状态:', response.status);
+    
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    return response.json();
+    
+    const data = await response.json();
+    console.log('表情API返回数据类型:', Array.isArray(data) ? 'array' : typeof data);
+    console.log('表情API返回数量:', Array.isArray(data) ? data.length : 'N/A');
+    
+    if (!Array.isArray(data)) {
+      console.error('表情API返回的数据不是数组:', data);
+      return [];
+    }
+    
+    return data;
   } catch (error) {
     console.error(`Failed to get custom emojis from ${instance}:`, error);
     return [];

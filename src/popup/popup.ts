@@ -310,16 +310,35 @@ function removePoll(): void {
 async function loadCustomEmojis(): Promise<void> {
   if (!credentials) return;
   
+  emojiList.innerHTML = '<div class="emoji-no-results">加载中...</div>';
+  
   try {
     customEmojis = await getCustomEmojis(credentials.instance);
-    renderEmojiList(customEmojis);
+    console.log('加载到表情数量:', customEmojis.length);
+    console.log('表情数据示例:', customEmojis.slice(0, 3));
+    
+    const visibleEmojis = customEmojis.filter(emoji => 
+      emoji.visible_in_picker === true || emoji.visible_in_picker === undefined
+    );
+    console.log('可见表情数量:', visibleEmojis.length);
+    
+    renderEmojiList(visibleEmojis);
   } catch (error) {
     console.error('加载表情失败:', error);
+    emojiList.innerHTML = '<div class="emoji-no-results">加载表情失败，请重试</div>';
   }
 }
 
 function renderEmojiList(emojis: CustomEmoji[]): void {
   emojiList.innerHTML = '';
+  
+  if (emojis.length === 0) {
+    const noResults = document.createElement('div');
+    noResults.className = 'emoji-no-results';
+    noResults.textContent = emojiSearch.value ? '没有找到匹配的表情' : '暂无表情符号';
+    emojiList.appendChild(noResults);
+    return;
+  }
   
   const categories: Record<string, CustomEmoji[]> = {};
   emojis.forEach(emoji => {
@@ -344,8 +363,7 @@ function renderEmojiList(emojis: CustomEmoji[]): void {
       const img = document.createElement('img');
       img.src = emoji.url;
       img.alt = emoji.shortcode;
-      img.style.width = '24px';
-      img.style.height = '24px';
+      img.loading = 'lazy';
       
       item.appendChild(img);
       item.addEventListener('click', () => insertEmoji(`:${emoji.shortcode}:`));
@@ -355,13 +373,17 @@ function renderEmojiList(emojis: CustomEmoji[]): void {
 }
 
 function filterEmojis(searchTerm: string): void {
-  if (!searchTerm) {
-    renderEmojiList(customEmojis);
+  const visibleEmojis = customEmojis.filter(emoji => 
+    emoji.visible_in_picker === true || emoji.visible_in_picker === undefined
+  );
+  
+  if (!searchTerm.trim()) {
+    renderEmojiList(visibleEmojis);
     return;
   }
   
-  const filtered = customEmojis.filter(emoji => 
-    emoji.shortcode.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = visibleEmojis.filter(emoji => 
+    emoji.shortcode.toLowerCase().includes(searchTerm.toLowerCase().trim())
   );
   renderEmojiList(filtered);
 }
@@ -375,11 +397,11 @@ function insertEmoji(shortcode: string): void {
 }
 
 function toggleEmojiPicker(): void {
-  const isHidden = emojiPicker.style.display === 'none';
+  const isHidden = emojiPicker.style.display === 'none' || emojiPicker.style.display === '';
   emojiPicker.style.display = isHidden ? 'block' : 'none';
   emojiBtn.classList.toggle('active', isHidden);
   
-  if (isHidden && customEmojis.length === 0) {
+  if (isHidden) {
     loadCustomEmojis();
   }
 }
