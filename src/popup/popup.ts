@@ -1,3 +1,4 @@
+import '../styles/popup.css';
 import { MonitoredAccount, NotificationSettings, MastodonAccount, MastodonCredentials } from '../types';
 import {
   getMonitoredAccounts,
