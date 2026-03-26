@@ -10,6 +10,7 @@ import {
   getCredentials,
 } from '../utils/storage';
 import { getAccountInfo, uploadMedia, getCustomEmojis } from '../utils/api';
+import { emojiCategories, EmojiCategory, emojiKeywords } from '../utils/emojiData';
 
 let monitoredAccounts: MonitoredAccount[] = [];
 let notificationSettings: NotificationSettings = {
@@ -59,12 +60,15 @@ const mediaPreviewContainer = document.getElementById('media-preview-container')
 let mediaFiles: MediaFile[] = [];
 let customEmojis: CustomEmoji[] = [];
 let pollData: PollData | null = null;
+let currentEmojiCategory = '表情';
+let allEmojis: { type: 'standard' | 'custom'; content: string; shortcode?: string }[] = [];
 
 const emojiBtn = document.getElementById('emoji-btn') as HTMLButtonElement;
 const pollBtn = document.getElementById('poll-btn') as HTMLButtonElement;
 const emojiPicker = document.getElementById('emoji-picker') as HTMLDivElement;
 const emojiList = document.getElementById('emoji-list') as HTMLDivElement;
 const emojiSearch = document.getElementById('emoji-search') as HTMLInputElement;
+let emojiTabsContainer: HTMLElement | null = null;
 const pollSection = document.getElementById('poll-section') as HTMLDivElement;
 const pollOptionsContainer = document.getElementById('poll-options') as HTMLDivElement;
 const addPollOptionBtn = document.getElementById('add-poll-option-btn') as HTMLButtonElement;
@@ -307,70 +311,177 @@ function removePoll(): void {
   inputs.forEach(input => input.value = '');
 }
 
+function createEmojiTabs(): void {
+  if (emojiTabsContainer) return;
+  
+  emojiTabsContainer = document.createElement('div');
+  emojiTabsContainer.className = 'emoji-tabs';
+  
+  const allCategory: EmojiCategory = {
+    name: '常用',
+    icon: '⭐',
+    emojis: []
+  };
+  
+  const customCategory: EmojiCategory = {
+    name: '自定义',
+    icon: '🎨',
+    emojis: []
+  };
+  
+  const allCategories = [allCategory, ...emojiCategories, customCategory];
+  
+  allCategories.forEach((category, index) => {
+    const tab = document.createElement('button');
+    tab.className = 'emoji-tab';
+    tab.textContent = category.icon;
+    tab.title = category.name;
+    tab.dataset.category = category.name;
+    
+    if (index === 0) {
+      tab.classList.add('active');
+    }
+    
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.emoji-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentEmojiCategory = category.name;
+      renderEmojiListByCategory(category.name);
+    });
+    
+    emojiTabsContainer!.appendChild(tab);
+  });
+  
+  emojiPicker.insertBefore(emojiTabsContainer, emojiPicker.firstChild);
+}
+
 async function loadCustomEmojis(): Promise<void> {
   if (!credentials) return;
   
   try {
     customEmojis = await getCustomEmojis(credentials.instance);
-    renderEmojiList(customEmojis);
+    if (emojiPicker.style.display !== 'none') {
+      renderEmojiListByCategory(currentEmojiCategory);
+    }
   } catch (error) {
     console.error('加载表情失败:', error);
   }
 }
 
-function renderEmojiList(emojis: CustomEmoji[]): void {
+function renderEmojiListByCategory(categoryName: string, searchTerm: string = ''): void {
   emojiList.innerHTML = '';
   
-  const categories: Record<string, CustomEmoji[]> = {};
-  emojis.forEach(emoji => {
-    const category = emoji.category || '其他';
-    if (!categories[category]) {
-      categories[category] = [];
-    }
-    categories[category].push(emoji);
-  });
+  let emojisToRender: { type: 'standard' | 'custom'; content: string; shortcode?: string }[] = [];
   
-  Object.entries(categories).forEach(([category, categoryEmojis]) => {
-    const categoryHeader = document.createElement('div');
-    categoryHeader.className = 'emoji-category';
-    categoryHeader.textContent = category;
-    emojiList.appendChild(categoryHeader);
-    
-    categoryEmojis.forEach(emoji => {
-      const item = document.createElement('div');
-      item.className = 'emoji-item';
-      item.title = `:${emoji.shortcode}:`;
-      
-      const img = document.createElement('img');
-      img.src = emoji.url;
-      img.alt = emoji.shortcode;
-      img.style.width = '24px';
-      img.style.height = '24px';
-      
-      item.appendChild(img);
-      item.addEventListener('click', () => insertEmoji(`:${emoji.shortcode}:`));
-      emojiList.appendChild(item);
-    });
-  });
-}
-
-function filterEmojis(searchTerm: string): void {
-  if (!searchTerm) {
-    renderEmojiList(customEmojis);
+  if (searchTerm) {
+    emojisToRender = searchAllEmojis(searchTerm);
+  } else if (categoryName === '常用') {
+    emojisToRender = getFrequentlyUsedEmojis();
+  } else if (categoryName === '自定义') {
+    emojisToRender = customEmojis.map(e => ({
+      type: 'custom' as const,
+      content: e.url,
+      shortcode: e.shortcode
+    }));
+  } else {
+    const category = emojiCategories.find(cat => cat.name === categoryName);
+    if (category) {
+      emojisToRender = category.emojis.map(e => ({
+        type: 'standard' as const,
+        content: e
+      }));
+    }
+  }
+  
+  if (emojisToRender.length === 0 && searchTerm) {
+    const emptyMessage = document.createElement('div');
+    emptyMessage.className = 'emoji-empty';
+    emptyMessage.textContent = '没有找到匹配的表情';
+    emojiList.appendChild(emptyMessage);
     return;
   }
   
-  const filtered = customEmojis.filter(emoji => 
-    emoji.shortcode.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  renderEmojiList(filtered);
+  if (!searchTerm && categoryName !== '自定义') {
+    const categoryHeader = document.createElement('div');
+    categoryHeader.className = 'emoji-category';
+    categoryHeader.textContent = categoryName;
+    emojiList.appendChild(categoryHeader);
+  }
+  
+  emojisToRender.forEach(emoji => {
+    const item = document.createElement('div');
+    item.className = 'emoji-item';
+    
+    if (emoji.type === 'standard') {
+      item.textContent = emoji.content;
+      item.title = emoji.content;
+      item.addEventListener('click', () => insertEmoji(emoji.content));
+    } else {
+      const img = document.createElement('img');
+      img.src = emoji.content;
+      img.alt = emoji.shortcode || '';
+      img.style.width = '24px';
+      img.style.height = '24px';
+      img.style.objectFit = 'contain';
+      item.appendChild(img);
+      item.title = `:${emoji.shortcode}:`;
+      item.addEventListener('click', () => insertEmoji(`:${emoji.shortcode}:`));
+    }
+    
+    emojiList.appendChild(item);
+  });
 }
 
-function insertEmoji(shortcode: string): void {
+function searchAllEmojis(keyword: string): { type: 'standard' | 'custom'; content: string; shortcode?: string }[] {
+  const results: { type: 'standard' | 'custom'; content: string; shortcode?: string }[] = [];
+  const lowerKeyword = keyword.toLowerCase();
+  
+  emojiCategories.forEach(category => {
+    category.emojis.forEach(emoji => {
+      const keywords = emojiKeywords[emoji] || [];
+      const categoryName = category.name.toLowerCase();
+      
+      if (emoji === keyword ||
+          categoryName.includes(lowerKeyword) ||
+          keywords.some(kw => kw.includes(lowerKeyword)) ||
+          emoji.includes(lowerKeyword)) {
+        if (!results.find(r => r.content === emoji)) {
+          results.push({ type: 'standard', content: emoji });
+        }
+      }
+    });
+  });
+  
+  customEmojis.forEach(emoji => {
+    if (emoji.shortcode.toLowerCase().includes(lowerKeyword) || 
+        (emoji.category && emoji.category.toLowerCase().includes(lowerKeyword))) {
+      results.push({ type: 'custom', content: emoji.url, shortcode: emoji.shortcode });
+    }
+  });
+  
+  return results;
+}
+
+function getFrequentlyUsedEmojis(): { type: 'standard' | 'custom'; content: string; shortcode?: string }[] {
+  const frequentEmojis = [
+    '😀', '😂', '🥰', '😎', '🤔', '👍', '❤️', '🔥',
+    '✨', '🎉', '💯', '🙏', '😊', '😉', '😴', '🤣',
+    '😍', '🥳', '😱', '🤗', '💪', '🙌', '👏', '😇'
+  ];
+  
+  return frequentEmojis.map(e => ({ type: 'standard' as const, content: e }));
+}
+
+function filterEmojis(searchTerm: string): void {
+  renderEmojiListByCategory(currentEmojiCategory, searchTerm);
+}
+
+function insertEmoji(emoji: string): void {
   const cursorPos = postContent.selectionStart;
   const text = postContent.value;
-  postContent.value = text.slice(0, cursorPos) + shortcode + text.slice(cursorPos);
+  postContent.value = text.slice(0, cursorPos) + emoji + text.slice(cursorPos);
   postContent.focus();
+  postContent.selectionStart = postContent.selectionEnd = cursorPos + emoji.length;
   updateCharCount();
 }
 
@@ -379,8 +490,13 @@ function toggleEmojiPicker(): void {
   emojiPicker.style.display = isHidden ? 'block' : 'none';
   emojiBtn.classList.toggle('active', isHidden);
   
-  if (isHidden && customEmojis.length === 0) {
-    loadCustomEmojis();
+  if (isHidden) {
+    createEmojiTabs();
+    renderEmojiListByCategory(currentEmojiCategory);
+    
+    if (customEmojis.length === 0) {
+      loadCustomEmojis();
+    }
   }
 }
 
